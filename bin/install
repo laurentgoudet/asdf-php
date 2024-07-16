@@ -79,10 +79,15 @@ install_php() {
 
     cd $(untar_path $install_type $version $tmp_download_dir)
 
+    apply_libxml2_patch "$(pwd)"
+
+    echo patching "$(pwd)/ext/phar/build_precommand.php"
+    sed -i .bak '3i\
+ ini_set("pcre.jit", "0");
+' ext/phar/build_precommand.php
+
     # Target is OS-specific
     # target=$(get_target)
-
-    apply_libxml2_patch "$(pwd)"
 
     # Build PHP
     echo "Running buildconfig..."
@@ -444,27 +449,6 @@ EOD
 
  		if (xmlErrorPtr) {
  			soap_error2(E_ERROR, "Parsing WSDL: Couldn't load from '%s' : %s", struri, xmlErrorPtr->message);
-EOD
-
-    patch -d "$php_src_dir" -p1 <<EOD
---- a/ext/pcre/pcre2lib/sljit/sljitExecAllocator.c
-+++ b/ext/pcre/pcre2lib/sljit/sljitExecAllocator.c
-@@ -175,12 +175,15 @@
-
- 	if (retval == MAP_FAILED)
- 		retval = NULL;
-+#ifdef __FreeBSD__
-+	/* HardenedBSD's mmap lies, so check permissions again */
- 	else {
- 		if (mprotect(retval, size, prot) < 0) {
- 			munmap(retval, size);
- 			retval = NULL;
- 		}
- 	}
-+#endif /* FreeBSD */
-
- 	return retval;
- }
 EOD
 
     echo "Inline patches applied."
