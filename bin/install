@@ -79,6 +79,8 @@ install_php() {
 
     cd $(untar_path $install_type $version $tmp_download_dir)
 
+    apply_libxml2_patch "$(pwd)"
+
     # Target is OS-specific
     # target=$(get_target)
 
@@ -168,27 +170,7 @@ construct_configure_options() {
   if [ "${PHP_WITHOUT_PDO_PGSQL:-no}" != "no" ]; then
     configure_options="$configure_options"
   else
-    local operating_system=$(uname -a)
-
-    if [[ $operating_system =~ "Darwin" ]]; then
-      exit_if_homebrew_not_installed
-
-      local libpq_path=$(homebrew_package_path libpq)
-
-      if [ -n "$libpq_path" ]; then
-        configure_options="$configure_options --with-pdo-pgsql=$libpq_path"
-      else
-        export ASDF_PKG_MISSING="$ASDF_PKG_MISSING libpq"
-      fi
-    else
-      configure_options="$configure_options --with-pdo-pgsql"
-    fi
-  fi
-
-  if [ "${PHP_WITHOUT_PCRE_JIT:-no}" != "no" ]; then
-    configure_options="$configure_options"
-  else
-    configure_options="$configure_options --without-pcre-jit"
+    configure_options="$configure_options --with-pdo-pgsql"
   fi
 
   echo "$configure_options"
@@ -368,6 +350,61 @@ download_source() {
 
   # curl -Lo $download_path -C - $download_url
   curl -Lo $download_path $download_url
+}
+
+apply_libxml2_patch() {
+  local install_type=$1
+  local version=$2
+  local install_path=$3
+  local patch_file="$install_path/share/php-build/patches/php-7.4-libxml2-2.12.patch"
+
+  if [[ $version == 7.4* ]] && [ -f "$patch_file" ]; then
+    echo "Applying libxml2 2.12 patch for PHP 7.4..."
+    patch -p1 < "$patch_file"
+  fi
+}
+
+apply_libxml2_patch() {
+  local php_src_dir=$1
+  local version=$2
+
+  # Convert version string to a comparable number
+  local version_number=$(echo "$version" | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3); }')
+
+  # Only apply patches if version is less than 8.2.14
+  if [ "$version_number" -lt 8002014 ]; then
+    echo "Applying inline patches for PHP version $version..."
+
+    # Patch for ext/dom/document.c
+    patch -d "$php_src_dir" -p1 <<EOD
+--- a/ext/dom/document.c
++++ b/ext/dom/document.c
+@@ -23,6 +23,7 @@
+ #if defined(HAVE_LIBXML) && defined(HAVE_DOM)
+ #include "php_dom.h"
+ #include <libxml/SAX.h>
++#include <libxml/xmlsave.h>
+ #ifdef LIBXML_SCHEMAS_ENABLED
+ #include <libxml/relaxng.h>
+ #include <libxml/xmlschemas.h>
+EOD
+
+    # Patch for ext/libxml/php_libxml.h
+    patch -d "$php_src_dir" -p1 <<EOD
+--- a/ext/libxml/php_libxml.h
++++ b/ext/libxml/php_libxml.h
+@@ -35,6 +35,7 @@
+ #include "zend_smart_str.h"
+ #include <libxml/tree.h>
++#include <libxml/parser.h>
+
+ #define LIBXML_SAVE_NOEMPTYTAG 1<<2
+EOD
+
+    echo "Inline patches applied."
+  else
+    echo "Skipping inline patches for PHP version $version (>= 8.2.0)."
+  fi
 }
 
 get_download_file_path() {
