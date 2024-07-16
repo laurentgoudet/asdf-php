@@ -79,10 +79,10 @@ install_php() {
 
     cd $(untar_path $install_type $version $tmp_download_dir)
 
-    apply_libxml2_patch "$(pwd)"
-
     # Target is OS-specific
     # target=$(get_target)
+
+    apply_libxml2_patch "$(pwd)"
 
     # Build PHP
     echo "Running buildconfig..."
@@ -353,18 +353,6 @@ download_source() {
 }
 
 apply_libxml2_patch() {
-  local install_type=$1
-  local version=$2
-  local install_path=$3
-  local patch_file="$install_path/share/php-build/patches/php-7.4-libxml2-2.12.patch"
-
-  if [[ $version == 7.4* ]] && [ -f "$patch_file" ]; then
-    echo "Applying libxml2 2.12 patch for PHP 7.4..."
-    patch -p1 < "$patch_file"
-  fi
-}
-
-apply_libxml2_patch() {
   local php_src_dir=$1
   local version=$2
 
@@ -399,6 +387,84 @@ EOD
 +#include <libxml/parser.h>
 
  #define LIBXML_SAVE_NOEMPTYTAG 1<<2
+EOD
+
+    patch -d "$php_src_dir" -p1 <<EOD
+--- a/ext/libxml/libxml.c
++++ b/ext/libxml/libxml.c
+@@ -481,7 +481,11 @@
+ 	xmlResetError((xmlErrorPtr) ptr);
+ }
+
+-static void _php_list_set_error_structure(xmlErrorPtr error, const char *msg)
++#if LIBXML_VERSION >= 21200
++static void _php_list_set_error_structure(const xmlError *error, const char *msg)
++#else
++static void _php_list_set_error_structure(xmlError *error, const char *msg)
++#endif
+ {
+ 	xmlError error_copy;
+ 	int ret;
+@@ -732,7 +736,11 @@
+ 	va_end(args);
+ }
+
++#if LIBXML_VERSION >= 21200
++PHP_LIBXML_API void php_libxml_structured_error_handler(void *userData, const xmlError *error)
++#else
+ PHP_LIBXML_API void php_libxml_structured_error_handler(void *userData, xmlErrorPtr error)
++#endif
+ {
+ 	_php_list_set_error_structure(error, NULL);
+
+@@ -1035,11 +1043,9 @@
+ /* {{{ Retrieve last error from libxml */
+ PHP_FUNCTION(libxml_get_last_error)
+ {
+-	xmlErrorPtr error;
+-
+ 	ZEND_PARSE_PARAMETERS_NONE();
+
+-	error = xmlGetLastError();
++  const xmlError *error = xmlGetLastError();
+
+ 	if (error) {
+ 		object_init_ex(return_value, libxmlerror_class_entry);
+EOD
+
+    patch -d "$php_src_dir" -p1 <<EOD
+--- a/ext/soap/php_sdl.c
++++ b/ext/soap/php_sdl.c
+@@ -331,7 +331,7 @@
+ 	sdl_restore_uri_credentials(ctx);
+
+ 	if (!wsdl) {
+-		xmlErrorPtr xmlErrorPtr = xmlGetLastError();
++    const xmlError *xmlErrorPtr = xmlGetLastError();
+
+ 		if (xmlErrorPtr) {
+ 			soap_error2(E_ERROR, "Parsing WSDL: Couldn't load from '%s' : %s", struri, xmlErrorPtr->message);
+EOD
+
+    patch -d "$php_src_dir" -p1 <<EOD
+--- a/ext/pcre/pcre2lib/sljit/sljitExecAllocator.c
++++ b/ext/pcre/pcre2lib/sljit/sljitExecAllocator.c
+@@ -175,12 +175,15 @@
+
+ 	if (retval == MAP_FAILED)
+ 		retval = NULL;
++#ifdef __FreeBSD__
++	/* HardenedBSD's mmap lies, so check permissions again */
+ 	else {
+ 		if (mprotect(retval, size, prot) < 0) {
+ 			munmap(retval, size);
+ 			retval = NULL;
+ 		}
+ 	}
++#endif /* FreeBSD */
+
+ 	return retval;
+ }
 EOD
 
     echo "Inline patches applied."
